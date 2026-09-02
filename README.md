@@ -4,8 +4,7 @@
 watch two LLM agents think, act, and talk to each other in real time, no
 polling logs by hand.
 
-> Screenshot coming soon — will be added once a capture is available.
-> <!-- ![dashboard screenshot](screenshot.png) -->
+![dashboard screenshot](screenshot.png)
 
 ## What it shows
 
