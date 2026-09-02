@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>antfarm2 — live viewer</title>
+<style>
+  :root {
+    --bg: #0a0d12;
+    --panel: #11151d;
+    --panel2: #0d1119;
+    --border: #212837;
+    --fg: #dbe3f0;
+    --muted: #6b7688;
+    --alpha: #6ee7ff;
+    --beta: #ffb86e;
+    --user: #7c8aa5;
+    --think: #9d7cff;
+    --tool: #6ee69a;
+    --toolresult: #5fae82;
+    --say: #ffd166;
+    --comms: #ff6ec7;
+    --accent: #b892ff;
+    --active-glow: #4ade80;
+    /* Hermes desktop app's own UI sans font stack, pulled from its shipped
+       CSS (--dt-font-sans), used for names/avatars/headings to match app chrome */
+    --hermes-font-sans: "Segoe WPC", "Segoe UI", -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji", emoji;
+  }
+  * { box-sizing: border-box; }
+  @font-face {
+    font-family: "Collapse";
+    src: url("fonts/Collapse-Bold.woff2") format("woff2");
+    font-weight: 700;
+    font-style: normal;
+    font-display: swap;
+  }
+  body {
+    background: var(--bg);
+    background-image:
+      radial-gradient(circle at 15% -10%, rgba(110,231,255,.05), transparent 45%),
+      radial-gradient(circle at 90% 10%, rgba(255,184,110,.05), transparent 40%);
+    color: var(--fg);
+    font-family: -apple-system, "SF Mono", "Menlo", monospace;
+    margin: 0;
+    padding: 14px;
+    font-size: 13px;
+  }
+  ::-webkit-scrollbar { width: 9px; height: 9px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #2a3244; border-radius: 6px; border: 2px solid var(--panel); }
+  ::-webkit-scrollbar-thumb:hover { background: #3a4560; }
+  * { scrollbar-width: thin; scrollbar-color: #2a3244 transparent; }
+  h1 {
+    font-size: 26px; margin: 0 0 4px 0; display:flex; align-items:center; gap:8px;
+    font-family: "Collapse", var(--hermes-font-sans); text-transform: uppercase; letter-spacing: .02em;
+  }
+  .h1-accent {
+    height: 3px; width: 64px; border-radius: 2px; margin: 4px 0 10px;
+    background: linear-gradient(90deg, var(--alpha), var(--comms), var(--beta));
+  }
+  .sub { color: var(--muted); font-size: 11px; margin-bottom: 12px; }
+
+  .agent-status-bar {
+    display: grid;
+    grid-template-columns: 1fr 1fr 300px;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  .status-card {
+    flex: 1;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    transition: box-shadow .5s ease, border-color .5s ease, background .5s ease;
+  }
+  .status-card.active { border-color: var(--active-glow); box-shadow: 0 0 18px -1px var(--active-glow); animation: cardGlow 2.2s ease-in-out infinite; }
+  @keyframes cardGlow {
+    0%,100% { box-shadow: 0 0 12px -2px var(--active-glow); }
+    50% { box-shadow: 0 0 22px 1px var(--active-glow); }
+  }
+  .status-left { display: flex; align-items: center; gap: 12px; }
+  .status-right {
+    display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0;
+  }
+  .agent-avatar {
+    width: 44px; height: 44px; flex-shrink: 0; transition: transform .25s ease;
+    position: relative; display: flex; align-items: center; justify-content: center;
+    filter: drop-shadow(0 3px 6px rgba(0,0,0,.5));
+    animation: avatarWobble 3.4s ease-in-out infinite;
+  }
+  .agent-avatar .blob {
+    width: 44px; height: 44px;
+    border-radius: 50% / 58% 58% 42% 42%;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    border: 2px solid rgba(255,255,255,.35);
+    box-shadow: inset 0 -6px 10px rgba(0,0,0,.22), inset 0 4px 8px rgba(255,255,255,.25);
+  }
+  .agent-avatar .eye {
+    width: 7px; height: 7px; border-radius: 50%; background: #1c1c1c;
+    box-shadow: inset 0 -1px 1px rgba(255,255,255,.4);
+    animation: agentBlink 4.5s ease-in-out infinite;
+  }
+  .agent-avatar .eye:nth-child(2) { animation-delay: .08s; }
+  @keyframes agentBlink {
+    0%, 92%, 100% { transform: scaleY(1); }
+    95% { transform: scaleY(0.12); }
+  }
+  @keyframes avatarWobble {
+    0%, 62%, 100% { transform: rotate(0deg); }
+    8% { transform: rotate(-6deg); }
+    16% { transform: rotate(5deg); }
+    24% { transform: rotate(-4deg); }
+    32% { transform: rotate(3deg); }
+    40% { transform: rotate(0deg); }
+  }
+  .agent-avatar.alpha .blob { background: radial-gradient(circle at 32% 28%, #ecffff, var(--alpha) 70%); }
+  .agent-avatar.beta .blob { background: radial-gradient(circle at 32% 28%, #fff3e2, var(--beta) 70%); }
+  .status-card.active .agent-avatar { transform: scale(1.15); }
+  .agent-name {
+    font-weight: 700; font-size: 20px; letter-spacing: .02em;
+    font-family: "Collapse", var(--hermes-font-sans);
+    text-transform: uppercase;
+  }
+  .agent-name.alpha { color: var(--alpha); }
+  .agent-name.beta { color: var(--beta); }
+  .agent-id { display: flex; flex-direction: column; gap: 1px; }
+  .agent-model { font-size: 9px; color: var(--muted); letter-spacing: .01em; }
+  .status-pill {
+    font-size: 10px; text-transform: uppercase; letter-spacing: .06em;
+    font-family: var(--hermes-font-sans);
+    padding: 3px 9px; border-radius: 12px; font-weight: 600;
+  }
+  .status-pill.active { background: #10331f; color: var(--active-glow); }
+  .status-pill.idle { background: #1c2231; color: var(--muted); }
+  .status-model { color: var(--muted); font-size: 11px; }
+  .status-meta { color: var(--muted); font-size: 10px; text-align: right; font-family: var(--hermes-font-sans); }
+
+  .run-overview {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 16px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+  }
+  .run-overview .label {
+    font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
+    font-family: var(--hermes-font-sans);
+  }
+  .run-overview .value {
+    font-size: 20px; font-weight: 700; font-family: "Collapse", var(--hermes-font-sans);
+    display: flex; align-items: baseline; gap: 6px;
+  }
+  .run-overview .value .split { color: var(--muted); font-size: 12px; font-weight: 400; font-family: var(--hermes-font-sans); }
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 300px;
+    gap: 12px;
+    height: calc(100vh - 150px);
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    scroll-behavior: smooth;
+    transition: border-color .3s ease;
+  }
+  .sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    height: 100%;
+    overflow: hidden;
+  }
+  .sidebar-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px;
+    transition: border-color .3s ease;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .sidebar-card:hover { border-color: #2c374d; }
+  .sidebar-card.grow { flex: 1; min-height: 120px; }
+  .sidebar-card h2 {
+    font-size: 13px;
+    font-family: "Collapse", var(--hermes-font-sans);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--muted);
+    margin: 0 0 8px 0;
+    flex-shrink: 0;
+  }
+  .sidebar-card-body { overflow-y: auto; min-height: 0; flex: 1; }
+  .sidebar-card-body.fixed-4 { max-height: 300px; }
+  .sidebar-card-body.fixed-sm { max-height: 130px; }
+  .sidebar-card-body.fixed-stats { max-height: 210px; }
+  .newest-badge {
+    font-size: 9px; text-transform: none; letter-spacing: 0; color: var(--muted);
+    background: #171c27; border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px;
+  }
+
+  /* --- chat bubbles --- */
+  .bubble-row { display: flex; margin-bottom: 10px; gap: 8px; align-items: flex-start; }
+
+  .mini-avatar {
+    width: 28px; height: 28px; flex-shrink:0; margin-top: 2px;
+    display:flex; align-items:center; justify-content:center;
+    filter: drop-shadow(0 2px 3px rgba(0,0,0,.4));
+  }
+  .mini-avatar .blob {
+    width: 28px; height: 28px;
+    border-radius: 50% / 58% 58% 42% 42%;
+    display: flex; align-items: center; justify-content: center; gap: 5px;
+    border: 1.5px solid rgba(255,255,255,.3);
+    box-shadow: inset 0 -4px 7px rgba(0,0,0,.2), inset 0 3px 5px rgba(255,255,255,.22);
+  }
+  .mini-avatar .eye { width: 4.5px; height: 4.5px; border-radius: 50%; background: #1c1c1c; }
+  .mini-avatar.alpha .blob { background: radial-gradient(circle at 32% 28%, #ecffff, var(--alpha) 70%); }
+  .mini-avatar.beta .blob { background: radial-gradient(circle at 32% 28%, #fff3e2, var(--beta) 70%); }
+
+  .bubble {
+    max-width: calc(100% - 36px);
+    flex: 1;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-left-width: 3px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    transition: transform .15s ease, box-shadow .15s ease;
+  }
+  .bubble:hover { transform: translateX(2px); box-shadow: 0 2px 8px rgba(0,0,0,0.4); }
+  .bubble-row.alpha .bubble { border-left-color: var(--alpha); }
+  .bubble-row.beta .bubble { border-left-color: var(--beta); }
+
+  .bubble-head {
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+    padding: 5px 10px; display:flex; align-items:center; gap: 6px; justify-content:space-between;
+  }
+  .bubble-head .kind { display:flex; align-items:center; gap:6px; }
+  .bubble-head .kind-emoji { font-size: 16px; line-height: 1; }
+  .bubble-body { padding: 8px 10px; font-size: 12px; white-space: pre-wrap; word-break: break-word; line-height:1.5; }
+  .bubble-time { font-weight: 400; opacity: 0.7; font-size: 9px; }
+
+  /* thinking */
+  .bubble.think { background: #14102b; border-color: #2c2360; }
+  .bubble.think .bubble-head { background: #1a1638; color: var(--think); }
+  .bubble.think .bubble-body { color: #c3b3f0; font-style: italic; font-size: 11.5px; }
+
+  /* action / tool call */
+  .bubble.action { background: #0d1912; border-color: #1c3524; }
+  .bubble.action .bubble-head { background: #10241a; color: var(--tool); }
+  .bubble.action .bubble-body { color: #9be0b8; font-family: monospace; font-size: 11px; }
+
+  /* result */
+  .bubble.result { background: #0a1512; border-color: #17281f; }
+  .bubble.result .bubble-head { background: #0e1e18; color: var(--toolresult); }
+  .bubble.result .bubble-body { color: #8fbfa5; font-family: monospace; font-size: 10.5px; max-height:140px; overflow-y:auto; }
+
+  /* says / output */
+  .bubble.say { background: #241d0d; border-color: #453a18; }
+  .bubble.say .bubble-head { background: #2c2410; color: var(--say); }
+  .bubble.say .bubble-body { color: #f0e0a8; font-weight: 500; }
+
+  /* harness ping */
+  .bubble.ping { background: #12151c; border-color: var(--border); opacity: .75; }
+  .bubble.ping .bubble-head { background: #171b24; color: var(--user); }
+  .bubble.ping .bubble-body { color: #9aa5b8; font-size: 11px; }
+
+  /* entrance animation for newly-appended bubbles */
+  @keyframes bubbleIn {
+    from { opacity: 0; transform: translateY(10px) scale(.98); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .bubble-row.bubble-new { animation: bubbleIn .35s ease-out; }
+
+  /* brief highlight pop on the single newest bubble */
+  @keyframes popFlash {
+    0%   { box-shadow: 0 0 0 0 rgba(255,255,255,0.35); }
+    100% { box-shadow: 0 0 0 10px rgba(255,255,255,0); }
+  }
+  .bubble-row.bubble-latest .bubble { animation: popFlash 1s ease-out; }
+
+  /* typing indicator */
+  .typing-row { display:flex; gap:8px; align-items:center; margin-top: 4px; opacity: .85; }
+  .typing-bubble {
+    display:inline-flex; align-items:center; gap:4px; padding: 8px 12px; border-radius: 14px;
+    background: #171c27; border: 1px solid var(--border);
+  }
+  .typing-dot { width:6px; height:6px; border-radius:50%; background: var(--muted); animation: typingBounce 1.1s infinite ease-in-out; }
+  .typing-dot:nth-child(2) { animation-delay: .15s; }
+  .typing-dot:nth-child(3) { animation-delay: .3s; }
+  @keyframes typingBounce {
+    0%, 60%, 100% { transform: translateY(0); opacity: .4; }
+    30% { transform: translateY(-4px); opacity: 1; }
+  }
+  .bubble-row.alpha .typing-dot { background: var(--alpha); }
+  .bubble-row.beta .typing-dot { background: var(--beta); }
+
+  .tick-divider {
+    color: var(--muted); font-size: 9px; text-align:center; margin: 14px 0 8px;
+    display:flex; align-items:center; gap:8px;
+  }
+  .tick-divider::before, .tick-divider::after { content:""; flex:1; height:1px; background: var(--border); }
+
+  .comms-item {
+    border: 1px solid var(--comms);
+    border-radius: 10px;
+    padding: 8px 10px;
+    margin-bottom: 8px;
+    background: #1a0f18;
+  }
+  .comms-item.comms-new { animation: commsPulse 1.4s ease-out; }
+  @keyframes commsPulse {
+    0%   { box-shadow: 0 0 0 0 rgba(255,110,199,0.6); background: #2a1522; }
+    100% { box-shadow: 0 0 0 12px rgba(255,110,199,0); background: #1a0f18; }
+  }
+  .comms-head { font-size: 10px; color: var(--comms); margin-bottom: 4px; font-weight:600; }
+  .comms-body { font-size: 11px; white-space: pre-wrap; }
+
+  .empty { color: var(--muted); font-style: italic; padding: 20px 10px; text-align: center; font-size: 12px; }
+
+  .stat-mini { display:flex; justify-content:space-between; padding: 3px 0; font-size:11px; }
+  .stat-block { margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+  .stat-block:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+  .stat-block-title {
+    font-weight: 700; margin-bottom: 4px; font-size: 11px;
+    text-transform: uppercase; letter-spacing: .03em;
+    font-family: var(--hermes-font-sans);
+  }
+  .bar-row { display:flex; align-items:center; gap:6px; font-size: 10px; margin: 4px 0; }
+  .bar-label { width: 76px; flex-shrink:0; color: var(--tool); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .bar-track { flex:1; height: 6px; border-radius: 4px; background: #171c27; overflow:hidden; }
+  .bar-fill { height: 100%; border-radius: 4px; background: linear-gradient(90deg, var(--tool), #a8ffcf); transition: width .5s ease; }
+  .bar-count { width: 20px; text-align:right; color: var(--muted); flex-shrink: 0; }
+
+  .file-item { padding: 5px 0; border-bottom: 1px dashed var(--border); font-size: 11px; }
+  .file-item .path { color: var(--accent); }
+  .timeline-item { font-size: 10px; color: var(--muted); padding: 2px 0; }
+
+  .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--active-glow); display: inline-block; animation: pulse 1.4s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.25; } }
+  .spinner { display:inline-block; width:9px; height:9px; border:2px solid var(--active-glow); border-top-color:transparent; border-radius:50%; animation: spin 0.7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<h1>🐜 antfarm2 <span class="live-dot"></span></h1>
+<div class="h1-accent"></div>
+<div class="sub">Live viewer · auto-refresh 3s · no assigned task · shared workspace ~/antfarm2/ · oldest → newest ↓</div>
+
+<div class="agent-status-bar" id="status-bar">
+  <div class="status-card" id="status-alpha">
+    <div class="status-left">
+      <span class="agent-avatar alpha"><span class="blob"><span class="eye"></span><span class="eye"></span></span></span>
+      <div class="agent-id">
+        <span class="agent-name alpha">ALPHA</span>
+        <span class="agent-model" id="model-alpha"></span>
+      </div>
+    </div>
+    <div class="status-right">
+      <span class="status-pill idle" id="pill-alpha">idle</span>
+      <div class="status-meta" id="meta-alpha"></div>
+    </div>
+  </div>
+  <div class="status-card" id="status-beta">
+    <div class="status-left">
+      <span class="agent-avatar beta"><span class="blob"><span class="eye"></span><span class="eye"></span></span></span>
+      <div class="agent-id">
+        <span class="agent-name beta">BETA</span>
+        <span class="agent-model" id="model-beta"></span>
+      </div>
+    </div>
+    <div class="status-right">
+      <span class="status-pill idle" id="pill-beta">idle</span>
+      <div class="status-meta" id="meta-beta"></div>
+    </div>
+  </div>
+  <div class="run-overview">
+    <span class="label">Total shifts</span>
+    <span class="value" id="run-total-shifts">–</span>
+  </div>
+</div>
+
+<div class="grid">
+
+  <div class="panel" id="alpha-panel">
+    <div id="alpha-messages" style="flex:1;"></div>
+  </div>
+
+  <div class="panel" id="beta-panel">
+    <div id="beta-messages" style="flex:1;"></div>
+  </div>
+
+  <div class="sidebar">
+    <div class="sidebar-card">
+      <h2>Inter-agent comms</h2>
+      <div class="sidebar-card-body fixed-4" id="comms-body"><div class="empty">no contact yet</div></div>
+    </div>
+
+    <div class="sidebar-card">
+      <h2>Stats</h2>
+      <div class="sidebar-card-body fixed-stats" id="stats-body"></div>
+    </div>
+
+    <div class="sidebar-card grow">
+      <h2>Shared workspace</h2>
+      <div class="sidebar-card-body" id="workspace-body"></div>
+    </div>
+
+    <div class="sidebar-card">
+      <h2>Observer ticks</h2>
+      <div class="sidebar-card-body fixed-sm" id="observer-body"></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const API = "http://127.0.0.1:8765";
+
+// track render state across refreshes so we only animate genuinely new items
+const renderState = {
+  alpha: { lastCount: 0 },
+  beta: { lastCount: 0 },
+  comms: { lastTs: null },
+};
+let agentActive = { alpha: false, beta: false };
+
+function fmtTime(ts) {
+  if (!ts) return "";
+  return new Date(ts * 1000).toLocaleTimeString();
+}
+function fmtAgo(ts) {
+  if (!ts) return "";
+  const s = Math.floor(Date.now()/1000 - ts);
+  if (s < 60) return s + "s ago";
+  if (s < 3600) return Math.floor(s/60) + "m ago";
+  return Math.floor(s/3600) + "h ago";
+}
+function escapeHtml(s) {
+  return (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+async function fetchJSON(path) {
+  const r = await fetch(API + path);
+  return r.json();
+}
+
+async function refreshStatus() {
+  const d = await fetchJSON("/api/status");
+  const shift = d.shift || {};
+  for (const agent of ["alpha","beta"]) {
+    const s = d[agent] || {};
+    agentActive[agent] = !!s.active;
+    const card = document.getElementById(`status-${agent}`);
+    const pill = document.getElementById(`pill-${agent}`);
+    const meta = document.getElementById(`meta-${agent}`);
+    const isShift = shift.current_shift === agent;
+    if (s.active) {
+      card.classList.add("active");
+      pill.className = "status-pill active";
+      pill.innerHTML = `<span class="spinner"></span> running`;
+      meta.textContent = "started " + fmtAgo(s.started_at);
+    } else {
+      card.classList.remove("active");
+      pill.className = "status-pill idle";
+      pill.textContent = isShift ? "on shift · waiting for tick" : "off shift";
+      meta.textContent = s.started_at ? "last tick " + fmtAgo(s.started_at) : "no sessions yet";
+    }
+    if (isShift) {
+      card.style.outline = "2px solid " + (agent === "alpha" ? "var(--alpha)" : "var(--beta)");
+    } else {
+      card.style.outline = "none";
+    }
+  }
+}
+
+async function refreshStats() {
+  const d = await fetchJSON("/api/stats");
+  let html = "";
+  let combinedShifts = 0;
+  for (const agent of ["alpha", "beta"]) {
+    const s = d[agent] || {};
+    const color = agent === "alpha" ? "var(--alpha)" : "var(--beta)";
+    combinedShifts += s.total_shifts || 0;
+    html += `<div class="stat-block">`;
+    html += `<div class="stat-block-title" style="color:${color};">${agent}</div>`;
+    html += `<div class="stat-mini"><span>shifts</span><span>${s.total_shifts ?? "-"}</span></div>`;
+    html += `<div class="stat-mini"><span>last active</span><span>${s.last_active ? fmtAgo(s.last_active) : "-"}</span></div>`;
+    const tools = s.tool_usage || {};
+    const keys = Object.keys(tools);
+    if (keys.length) {
+      const max = Math.max(...keys.map(k => tools[k]));
+      html += keys.sort((a,b)=>tools[b]-tools[a]).map(k => {
+        const pct = Math.max(6, Math.round((tools[k]/max)*100));
+        return `<div class="bar-row">
+          <span class="bar-label">${escapeHtml(k)}</span>
+          <span class="bar-track"><span class="bar-fill" style="width:${pct}%"></span></span>
+          <span class="bar-count">${tools[k]}</span>
+        </div>`;
+      }).join("");
+    } else {
+      html += `<div style="color:var(--muted);font-size:10px;margin:4px 0;">no real tool calls yet</div>`;
+    }
+    html += `</div>`;
+  }
+  document.getElementById("stats-body").innerHTML = html;
+
+  const a = d.alpha || {}, b = d.beta || {};
+  const totalEl = document.getElementById("run-total-shifts");
+  if (totalEl) {
+    totalEl.innerHTML = `${combinedShifts}<span class="split">(${a.total_shifts ?? 0} α · ${b.total_shifts ?? 0} β)</span>`;
+  }
+}
+
+// Build a flat, chronologically-ordered list of "bubble" events from raw messages.
+function buildBubbles(allMsgs) {
+  const bubbles = [];
+  let lastSession = null;
+  for (const m of allMsgs) {
+    const tickChanged = m._session !== lastSession;
+    if (tickChanged) lastSession = m._session;
+
+    if (m.role === "user") {
+      let content = (m.content||"").replace(/^\[IMPORTANT:.*?\]\s*/s, "").trim();
+      if (!content) continue;
+      bubbles.push({ kind: "ping", icon: "📟", label: "harness ping", ts: m.timestamp, body: content, tickChanged, session: m._session });
+      continue;
+    }
+    if (m.role === "assistant") {
+      if (m.reasoning && m.reasoning.trim()) {
+        bubbles.push({ kind: "think", icon: "💭", label: "thinking", ts: m.timestamp, body: m.reasoning.trim(), tickChanged, session: m._session });
+      }
+      if (m.tool_calls) {
+        try {
+          const calls = JSON.parse(m.tool_calls);
+          for (const c of calls) {
+            const fn = c.function || {};
+            bubbles.push({ kind: "action", icon: "⚙️", label: "doing: " + (fn.name||"tool"), ts: m.timestamp, body: `${fn.name}(${fn.arguments||""})`, tickChanged: false, session: m._session });
+          }
+        } catch(e) {}
+      }
+      if (m.content && m.content.trim()) {
+        bubbles.push({ kind: "say", icon: "💬", label: "saying", ts: m.timestamp, body: m.content.trim(), tickChanged: false, session: m._session });
+      }
+      continue;
+    }
+    if (m.role === "tool") {
+      let content = (m.content||"").trim();
+      if (content.length > 800) content = content.slice(0,800) + "…";
+      bubbles.push({ kind: "result", icon: "👁️", label: "result: " + (m.tool_name||""), ts: m.timestamp, body: content, tickChanged: false, session: m._session });
+      continue;
+    }
+  }
+  return bubbles;
+}
+
+function renderBubbles(bubbles, agent, prevCount) {
+  let html = "";
+  let lastSession = null;
+  bubbles.forEach((b, i) => {
+    if (b.session !== lastSession) {
+      html += `<div class="tick-divider">shift ${b.session} · ${fmtTime(b.ts)}</div>`;
+      lastSession = b.session;
+    }
+    const isNew = i >= prevCount;
+    const isLatest = i === bubbles.length - 1;
+    const rowClasses = ["bubble-row", agent];
+    if (isNew) rowClasses.push("bubble-new");
+    if (isNew && isLatest) rowClasses.push("bubble-latest");
+    html += `<div class="${rowClasses.join(' ')}">
+      <span class="mini-avatar ${agent}"><span class="blob"><span class="eye"></span><span class="eye"></span></span></span>
+      <div class="bubble ${b.kind}">
+        <div class="bubble-head">
+          <span class="kind"><span class="kind-emoji">${b.icon}</span> ${escapeHtml(b.label)}</span>
+          <span class="bubble-time">${fmtTime(b.ts)}</span>
+        </div>
+        <div class="bubble-body">${escapeHtml(b.body)}</div>
+      </div>
+    </div>`;
+  });
+  return html || `<div class="empty">nothing to show</div>`;
+}
+
+function typingIndicatorHtml(agent) {
+  return `<div class="bubble-row ${agent}">
+    <span class="mini-avatar ${agent}"><span class="blob"><span class="eye"></span><span class="eye"></span></span></span>
+    <div class="typing-bubble">
+      <span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>
+    </div>
+  </div>`;
+}
+
+async function refreshAgentColumn(agent) {
+  const sessD = await fetchJSON(`/api/sessions?agent=${agent}`);
+  const sessions = sessD.sessions || [];
+  document.getElementById(`model-${agent}`).textContent = sessions[0] ? (sessions[0].model||"") : "";
+  const container = document.getElementById(`${agent}-messages`);
+  const scroller = document.getElementById(`${agent}-panel`); // the actual overflow:auto element
+  if (!sessions.length) {
+    container.innerHTML = `<div class="empty">no sessions yet</div>`;
+    return;
+  }
+  // pull messages from the most recent N sessions (chronological), newest session last
+  const recent = sessions.slice(0, 4).reverse();
+  let allMsgs = [];
+  for (const s of recent) {
+    const d = await fetchJSON(`/api/messages?agent=${agent}&session_id=${s.id}`);
+    allMsgs = allMsgs.concat((d.messages||[]).map(m => ({...m, _session: s.id})));
+  }
+  if (!allMsgs.length) {
+    container.innerHTML = `<div class="empty">no messages</div>`;
+    return;
+  }
+  const bubbles = buildBubbles(allMsgs);
+  const state = renderState[agent];
+  // if the bubble count went DOWN (new session started, history trimmed), don't
+  // treat everything as "new" — just reset the baseline quietly
+  const prevCount = bubbles.length >= state.lastCount ? state.lastCount : bubbles.length;
+
+  const nearBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 60;
+  let html = renderBubbles(bubbles, agent, prevCount);
+  if (agentActive[agent]) html += typingIndicatorHtml(agent);
+  container.innerHTML = html;
+  if (nearBottom) scroller.scrollTop = scroller.scrollHeight;
+
+  state.lastCount = bubbles.length;
+}
+
+async function refreshComms() {
+  const d = await fetchJSON("/api/agent-messages");
+  const msgs = d.messages || [];
+  const container = document.getElementById("comms-body");
+  if (!msgs.length) {
+    container.innerHTML = `<div class="empty">no contact yet</div>`;
+    return;
+  }
+  const recent = msgs.slice(-12).reverse();
+  const newestTs = recent[0] ? recent[0].timestamp : null;
+  const prevTs = renderState.comms.lastTs;
+  container.innerHTML = recent.map(m => {
+    let body = m.content || "";
+    if (m.tool_calls) {
+      try {
+        const calls = JSON.parse(m.tool_calls);
+        body = calls.map(c => c.function?.arguments || "").join(" ");
+      } catch(e) {}
+    }
+    const isNew = prevTs !== null && m.timestamp > prevTs;
+    return `<div class="comms-item ${isNew ? 'comms-new' : ''}">
+      <div class="comms-head">${m.from_agent} → peer · ${fmtTime(m.timestamp)}</div>
+      <div class="comms-body">${escapeHtml(body.slice(0,300))}</div>
+    </div>`;
+  }).join("");
+  renderState.comms.lastTs = newestTs;
+}
+
+async function refreshWorkspace() {
+  const d = await fetchJSON("/api/workspace");
+  const files = d.files || [];
+  const container = document.getElementById("workspace-body");
+  if (!files.length) {
+    container.innerHTML = `<div class="empty">workspace empty</div>`;
+    return;
+  }
+  container.innerHTML = files.map(f => `
+    <div class="file-item">
+      <div class="path">${f.path}</div>
+      <div style="color:var(--muted)">${f.size}b · ${fmtAgo(f.mtime)}</div>
+    </div>
+  `).join("");
+}
+
+async function refreshObserver() {
+  const d = await fetchJSON("/api/observer");
+  const timeline = d.timeline || [];
+  const container = document.getElementById("observer-body");
+  if (!timeline.length) {
+    container.innerHTML = `<div class="empty">no snapshots yet</div>`;
+    return;
+  }
+  container.innerHTML = timeline.slice(-10).reverse().map(t => `
+    <div class="timeline-item">${new Date(t.ts).toLocaleTimeString()} · ${t.n_files} file(s)</div>
+  `).join("");
+}
+
+async function refreshAll() {
+  try {
+    await refreshStatus(); // must resolve first so agentActive is fresh for the typing indicator
+    await Promise.all([
+      refreshStats(),
+      refreshAgentColumn("alpha"),
+      refreshAgentColumn("beta"),
+      refreshComms(),
+      refreshWorkspace(),
+      refreshObserver(),
+    ]);
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+refreshAll();
+setInterval(refreshAll, 3000);
+</script>
+
+</body>
+</html>
