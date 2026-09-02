@@ -50,14 +50,19 @@
   ::-webkit-scrollbar-thumb:hover { background: #3a4560; }
   * { scrollbar-width: thin; scrollbar-color: #2a3244 transparent; }
   h1 {
-    font-size: 26px; margin: 0 0 4px 0; display:flex; align-items:center; gap:8px;
-    font-family: "Collapse", var(--hermes-font-sans); text-transform: uppercase; letter-spacing: .02em;
+    font-size: 52px; margin: 0 0 2px 0; display:flex; align-items:center; gap:14px;
+    font-family: "Collapse", var(--hermes-font-sans); text-transform: uppercase; letter-spacing: .01em;
+    line-height: 1;
+    text-shadow: 0 0 24px rgba(110,231,255,.25), 0 0 50px rgba(255,184,110,.12);
   }
+  h1 .ant-emoji { font-size: 44px; filter: drop-shadow(0 2px 6px rgba(0,0,0,.5)); }
+  h1 .live-dot { width: 11px; height: 11px; align-self: flex-start; margin-top: 10px; }
   .h1-accent {
-    height: 3px; width: 64px; border-radius: 2px; margin: 4px 0 10px;
+    height: 4px; width: 110px; border-radius: 3px; margin: 8px 0 12px;
     background: linear-gradient(90deg, var(--alpha), var(--comms), var(--beta));
+    box-shadow: 0 0 10px rgba(184,146,255,.4);
   }
-  .sub { color: var(--muted); font-size: 11px; margin-bottom: 12px; }
+  .sub { color: var(--muted); font-size: 12px; margin-bottom: 14px; letter-spacing: .01em; }
 
   .agent-status-bar {
     display: grid;
@@ -162,7 +167,7 @@
     display: grid;
     grid-template-columns: 1fr 1fr 300px;
     gap: 12px;
-    height: calc(100vh - 150px);
+    height: calc(100vh - 190px);
   }
   .panel {
     background: var(--panel);
@@ -358,7 +363,7 @@
 </head>
 <body>
 
-<h1>🐜 antfarm2 <span class="live-dot"></span></h1>
+<h1><span class="ant-emoji">🐜</span> antfarm2 <span class="live-dot"></span></h1>
 <div class="h1-accent"></div>
 <div class="sub">Live viewer · auto-refresh 3s · no assigned task · shared workspace ~/antfarm2/ · oldest → newest ↓</div>
 
