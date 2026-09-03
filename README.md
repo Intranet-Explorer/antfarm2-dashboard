@@ -38,10 +38,7 @@ point it at a running (or paused) harness instance.
 
 Dark, chat-bubble layout, styled to visually match the Hermes desktop app
 it was built alongside (same UI font stack, and headers use the app's
-"Collapse" display typeface — bundled here as a local asset, which is the
-reason this repo is private rather than public: that font's redistribution
-terms aren't something we control).
-
+"Collapse" display typeface — bundled here as a local asset.
 ## Status
 
 Actively developed alongside the harness — this is the observation half of
