@@ -24,6 +24,15 @@
     /* Hermes desktop app's own UI sans font stack, pulled from its shipped
        CSS (--dt-font-sans), used for names/avatars/headings to match app chrome */
     --hermes-font-sans: "Segoe WPC", "Segoe UI", -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji", emoji;
+
+    /* --- elevation system (FluentUI-style layered surfaces) --- */
+    --e1: rgba(255,255,255,.025);
+    --e2: rgba(255,255,255,.045);
+    --e3: rgba(255,255,255,.07);
+    --acrylic-blur: 18px;
+    --shadow-1: 0 1px 2px rgba(0,0,0,.35), 0 0 0 1px rgba(255,255,255,.03) inset;
+    --shadow-2: 0 4px 16px -4px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.05) inset, 0 1px 0 rgba(255,255,255,.04) inset;
+    --shadow-3: 0 10px 32px -8px rgba(0,0,0,.65), 0 0 0 1px rgba(255,255,255,.07) inset, 0 1px 0 rgba(255,255,255,.06) inset;
   }
   * { box-sizing: border-box; }
   @font-face {
@@ -72,20 +81,24 @@
   }
   .status-card {
     flex: 1;
-    background: var(--panel);
+    background: linear-gradient(180deg, var(--e2), var(--e1)), var(--panel);
+    backdrop-filter: blur(var(--acrylic-blur)) saturate(1.3);
+    -webkit-backdrop-filter: blur(var(--acrylic-blur)) saturate(1.3);
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: 12px;
     padding: 10px 16px;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 10px;
-    transition: box-shadow .5s ease, border-color .5s ease, background .5s ease;
+    box-shadow: var(--shadow-2);
+    transition: box-shadow .5s ease, border-color .5s ease, background .5s ease, transform .2s ease;
   }
-  .status-card.active { border-color: var(--active-glow); box-shadow: 0 0 18px -1px var(--active-glow); animation: cardGlow 2.2s ease-in-out infinite; }
+  .status-card:hover { transform: translateY(-1px); box-shadow: var(--shadow-3); }
+  .status-card.active { border-color: var(--active-glow); box-shadow: var(--shadow-3), 0 0 18px -1px var(--active-glow); animation: cardGlow 2.2s ease-in-out infinite; }
   @keyframes cardGlow {
-    0%,100% { box-shadow: 0 0 12px -2px var(--active-glow); }
-    50% { box-shadow: 0 0 22px 1px var(--active-glow); }
+    0%,100% { box-shadow: var(--shadow-2), 0 0 12px -2px var(--active-glow); }
+    50% { box-shadow: var(--shadow-3), 0 0 22px 1px var(--active-glow); }
   }
   .status-left { display: flex; align-items: center; gap: 12px; }
   .status-right {
@@ -145,15 +158,20 @@
   .status-meta { color: var(--muted); font-size: 10px; text-align: right; font-family: var(--hermes-font-sans); }
 
   .run-overview {
-    background: var(--panel);
+    background: linear-gradient(180deg, var(--e2), var(--e1)), var(--panel);
+    backdrop-filter: blur(var(--acrylic-blur)) saturate(1.3);
+    -webkit-backdrop-filter: blur(var(--acrylic-blur)) saturate(1.3);
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: 12px;
     padding: 10px 16px;
     display: flex;
     flex-direction: column;
     justify-content: center;
     gap: 4px;
+    box-shadow: var(--shadow-2);
+    transition: box-shadow .3s ease, transform .2s ease;
   }
+  .run-overview:hover { transform: translateY(-1px); box-shadow: var(--shadow-3); }
   .run-overview .label {
     font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
     font-family: var(--hermes-font-sans);
@@ -170,16 +188,19 @@
     height: calc(100vh - 190px);
   }
   .panel {
-    background: var(--panel);
+    background: linear-gradient(180deg, var(--e1), transparent 30%), var(--panel);
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: 12px;
     padding: 10px;
     overflow-y: auto;
     display: flex;
     flex-direction: column;
     scroll-behavior: smooth;
-    transition: border-color .3s ease;
+    box-shadow: var(--shadow-1);
+    transition: border-color .3s ease, box-shadow .3s ease;
+    position: relative;
   }
+  .panel:hover { box-shadow: var(--shadow-2); }
   .sidebar {
     display: flex;
     flex-direction: column;
@@ -188,19 +209,30 @@
     overflow: hidden;
   }
   .sidebar-card {
-    background: var(--panel);
+    background: linear-gradient(180deg, var(--e2), var(--e1)), var(--panel);
+    backdrop-filter: blur(var(--acrylic-blur)) saturate(1.3);
+    -webkit-backdrop-filter: blur(var(--acrylic-blur)) saturate(1.3);
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: 12px;
     padding: 10px;
-    transition: border-color .3s ease;
+    box-shadow: var(--shadow-1);
+    transition: border-color .3s ease, box-shadow .3s ease, transform .2s ease;
     display: flex;
     flex-direction: column;
     min-height: 0;
+    position: relative;
+    overflow: hidden;
   }
-  .sidebar-card:hover { border-color: #2c374d; }
+  .sidebar-card:hover { border-color: #2c374d; box-shadow: var(--shadow-2); transform: translateY(-1px); }
+  .sidebar-card::before {
+    content: ""; position: absolute; inset: 0; pointer-events: none; opacity: 0;
+    background: radial-gradient(240px circle at var(--mx,50%) var(--my,50%), rgba(255,255,255,.06), transparent 60%);
+    transition: opacity .25s ease;
+  }
+  .sidebar-card:hover::before { opacity: 1; }
   .sidebar-card.grow { flex: 1; min-height: 120px; }
   .sidebar-card h2 {
-    font-size: 13px;
+    font-size: var(--fs-sm);
     font-family: "Collapse", var(--hermes-font-sans);
     text-transform: uppercase;
     letter-spacing: 0.03em;
@@ -243,10 +275,17 @@
     overflow: hidden;
     border: 1px solid var(--border);
     border-left-width: 3px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    box-shadow: var(--shadow-1);
     transition: transform .15s ease, box-shadow .15s ease;
+    position: relative;
   }
-  .bubble:hover { transform: translateX(2px); box-shadow: 0 2px 8px rgba(0,0,0,0.4); }
+  .bubble::before {
+    content: ""; position: absolute; inset: 0; pointer-events: none; opacity: 0; z-index: 1;
+    background: radial-gradient(180px circle at var(--mx,50%) var(--my,50%), rgba(255,255,255,.05), transparent 60%);
+    transition: opacity .25s ease;
+  }
+  .bubble:hover::before { opacity: 1; }
+  .bubble:hover { transform: translateX(2px); box-shadow: var(--shadow-2); }
   .bubble-row.alpha .bubble { border-left-color: var(--alpha); }
   .bubble-row.beta .bubble { border-left-color: var(--beta); }
 
@@ -286,17 +325,21 @@
 
   /* entrance animation for newly-appended bubbles */
   @keyframes bubbleIn {
-    from { opacity: 0; transform: translateY(10px) scale(.98); }
-    to   { opacity: 1; transform: translateY(0) scale(1); }
+    from { opacity: 0; transform: translateY(14px) scale(.97); filter: blur(2px); }
+    to   { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
   }
-  .bubble-row.bubble-new { animation: bubbleIn .35s ease-out; }
+  .bubble-row.bubble-new { animation: bubbleIn .4s cubic-bezier(.22,1,.36,1); }
 
-  /* brief highlight pop on the single newest bubble */
+  /* brief highlight pop on the single newest bubble — connected-animation style glow settle */
   @keyframes popFlash {
-    0%   { box-shadow: 0 0 0 0 rgba(255,255,255,0.35); }
-    100% { box-shadow: 0 0 0 10px rgba(255,255,255,0); }
+    0%   { box-shadow: var(--shadow-2), 0 0 0 0 rgba(255,255,255,0.4); }
+    60%  { box-shadow: var(--shadow-2), 0 0 0 8px rgba(255,255,255,0.08); }
+    100% { box-shadow: var(--shadow-1), 0 0 0 0 rgba(255,255,255,0); }
   }
-  .bubble-row.bubble-latest .bubble { animation: popFlash 1s ease-out; }
+  .bubble-row.bubble-latest .bubble { animation: popFlash 1.2s ease-out; }
+
+  /* de-emphasize the column of whichever agent isn't currently active */
+  .panel.agent-inactive { opacity: .82; filter: saturate(.85); transition: opacity .4s ease, filter .4s ease; }
 
   /* typing indicator */
   .typing-row { display:flex; gap:8px; align-items:center; margin-top: 4px; opacity: .85; }
@@ -491,6 +534,10 @@ async function refreshStatus() {
       card.style.outline = "none";
     }
   }
+  // dim whichever agent's column isn't currently active, if exactly one is
+  const anyActive = agentActive.alpha || agentActive.beta;
+  document.getElementById("alpha-panel").classList.toggle("agent-inactive", anyActive && !agentActive.alpha);
+  document.getElementById("beta-panel").classList.toggle("agent-inactive", anyActive && !agentActive.beta);
 }
 
 async function refreshStats() {
@@ -717,6 +764,18 @@ async function refreshAll() {
     console.error(e);
   }
 }
+
+// FluentUI-style reveal highlight: track cursor position within any
+// .sidebar-card or .bubble under the pointer, set as CSS vars the
+// ::before radial-gradient reads. Delegated to one document listener
+// so it works for bubbles re-rendered every refresh cycle.
+document.addEventListener("mousemove", (e) => {
+  const el = e.target.closest(".sidebar-card, .bubble");
+  if (!el) return;
+  const rect = el.getBoundingClientRect();
+  el.style.setProperty("--mx", (e.clientX - rect.left) + "px");
+  el.style.setProperty("--my", (e.clientY - rect.top) + "px");
+});
 
 refreshAll();
 setInterval(refreshAll, 3000);
