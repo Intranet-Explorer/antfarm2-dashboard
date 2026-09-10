@@ -1,1 +1,4 @@
 antfarm2 dashboard running at http://127.0.0.1:8765
+[restart] spawned replacement pid=29095, log=/Users/octo/antfarm2-dashboard/restart.log
+[restart] killing self pid=28356
+antfarm2 dashboard running at http://127.0.0.1:8765
