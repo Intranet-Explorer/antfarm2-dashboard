@@ -8,6 +8,10 @@ Stdlib only — no dependencies.
 import sqlite3
 import json
 import os
+import signal
+import subprocess
+import threading
+import time
 import http.server
 import socketserver
 from pathlib import Path
@@ -18,7 +22,10 @@ PROFILES = {
     "alpha": HOME / ".hermes/profiles/agent-alpha/state.db",
     "beta": HOME / ".hermes/profiles/agent-beta/state.db",
 }
-STANDALONE_DB = HOME / "antfarm2-standalone" / "state.db"
+STANDALONE_DIR = HOME / "antfarm2-standalone"
+STANDALONE_DB = STANDALONE_DIR / "state.db"
+STOP_FLAG = STANDALONE_DIR / "STOP"
+WATCHDOG_LOG = STANDALONE_DIR / "watchdog.log"
 OBSERVER_DIR = HOME / "antfarm2-observer"
 WORKSPACE_DIR = HOME / "antfarm2"
 STATIC_DIR = Path(__file__).parent / "static"
@@ -321,6 +328,93 @@ def fetch_shift():
         return None
 
 
+# --- process control ---------------------------------------------------
+
+def _pgrep_count(pattern):
+    try:
+        out = subprocess.run(
+            ["pgrep", "-f", pattern], capture_output=True, text=True, timeout=5
+        ).stdout.strip()
+        return len([l for l in out.split("\n") if l]) if out else 0
+    except Exception:
+        return 0
+
+
+def control_status():
+    return {
+        "harness_running": _pgrep_count(r"harness\.py") > 0,
+        "watchdog_running": _pgrep_count(r"watchdog\.sh") > 0,
+        "stop_flag_present": STOP_FLAG.exists(),
+    }
+
+
+def control_start():
+    """Ensure the watchdog (and via it, the harness) are running."""
+    status = control_status()
+    STOP_FLAG.unlink(missing_ok=True)
+    if status["watchdog_running"]:
+        return {"ok": True, "message": "watchdog already running"}
+    subprocess.Popen(
+        ["nohup", "bash", "watchdog.sh"],
+        cwd=str(STANDALONE_DIR),
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    return {"ok": True, "message": "watchdog started"}
+
+
+def control_stop():
+    """Signal a clean shutdown via the same STOP flag the harness/watchdog
+    already honor — never sends a raw kill, so a shift finishes cleanly."""
+    STOP_FLAG.touch()
+    return {"ok": True, "message": "STOP flag set — harness will finish its current turn and shut down"}
+
+
+def control_restart():
+    """Clean-stop then restart, without blocking the request: touches STOP,
+    waits (in a background thread) for the harness AND watchdog to actually
+    exit (the watchdog itself exits on seeing STOP, by design), then clears
+    STOP and starts a fresh watchdog to bring the harness back up."""
+    STOP_FLAG.touch()
+
+    def _wait_and_resume():
+        for _ in range(90):  # up to ~90s: harness finishes its turn, then watchdog notices STOP
+            time.sleep(1)
+            if _pgrep_count(r"harness\.py") == 0 and _pgrep_count(r"watchdog\.sh") == 0:
+                break
+        STOP_FLAG.unlink(missing_ok=True)
+        control_start()
+
+    threading.Thread(target=_wait_and_resume, daemon=True).start()
+    return {"ok": True, "message": "restarting: waiting for current turn to finish, then resuming"}
+
+
+def restart_dashboard_server():
+    """Spawn a detached replacement dashboard process, then exit this one.
+    Runs on a short delay in a background thread so the HTTP response for
+    the request that triggered this can actually be sent first. The old
+    process's socket needs a moment to fully release before the new one
+    can bind the same port even with SO_REUSEADDR set, so the replacement
+    is told to retry its own bind rather than racing a fixed sleep here."""
+    def _do_restart():
+        try:
+            time.sleep(0.3)
+            log_path = STANDALONE_DIR.parent / "antfarm2-dashboard" / "restart.log"
+            with open(log_path, "a") as logf:
+                p = subprocess.Popen(
+                    ["python3", str(Path(__file__).resolve())],
+                    stdout=logf, stderr=logf,
+                    start_new_session=True,
+                )
+            print(f"[restart] spawned replacement pid={p.pid}, log={log_path}")
+            time.sleep(0.3)
+            print(f"[restart] killing self pid={os.getpid()}")
+            os.kill(os.getpid(), signal.SIGTERM)
+        except Exception as e:
+            print(f"[restart] FAILED: {e}")
+    threading.Thread(target=_do_restart, daemon=True).start()
+
+
 class Handler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(STATIC_DIR), **kwargs)
@@ -411,14 +505,55 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self._send_json({"files": fetch_workspace_files()})
             return
 
+        if parsed.path == "/api/control/status":
+            self._send_json(control_status())
+            return
+
         # fall through to static file serving
         super().do_GET()
+
+    def do_POST(self):
+        parsed = urlparse(self.path)
+
+        if parsed.path == "/api/control/start":
+            self._send_json(control_start())
+            return
+
+        if parsed.path == "/api/control/stop":
+            self._send_json(control_stop())
+            return
+
+        if parsed.path == "/api/control/restart":
+            self._send_json(control_restart())
+            return
+
+        if parsed.path == "/api/control/restart-dashboard":
+            self._send_json({"ok": True, "message": "dashboard restarting"})
+            restart_dashboard_server()
+            return
+
+        self.send_response(404)
+        self.end_headers()
 
 
 def main():
     STATIC_DIR.mkdir(exist_ok=True)
     socketserver.ThreadingTCPServer.allow_reuse_address = True
-    with socketserver.ThreadingTCPServer(("127.0.0.1", PORT), Handler) as httpd:
+    # A restart-triggered spawn can race the old process's socket release
+    # even with SO_REUSEADDR — retry the bind for a few seconds instead of
+    # crashing outright on "Address already in use".
+    last_err = None
+    for attempt in range(20):
+        try:
+            httpd = socketserver.ThreadingTCPServer(("127.0.0.1", PORT), Handler)
+            break
+        except OSError as e:
+            last_err = e
+            time.sleep(0.5)
+    else:
+        print(f"antfarm2 dashboard: could not bind port {PORT} after retries: {last_err}")
+        raise SystemExit(1)
+    with httpd:
         print(f"antfarm2 dashboard running at http://127.0.0.1:{PORT}")
         httpd.serve_forever()
 
