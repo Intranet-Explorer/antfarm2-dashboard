@@ -402,6 +402,37 @@
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.25; } }
   .spinner { display:inline-block; width:9px; height:9px; border:2px solid var(--active-glow); border-top-color:transparent; border-radius:50%; animation: spin 0.7s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* --- control panel --- */
+  .control-status {
+    display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; font-size: 10.5px;
+  }
+  .control-pill {
+    padding: 3px 8px; border-radius: 10px; font-family: var(--hermes-font-sans);
+    border: 1px solid var(--border); display: inline-flex; align-items: center; gap: 5px;
+  }
+  .control-pill .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+  .control-pill.up { color: var(--active-glow); border-color: var(--active-glow); }
+  .control-pill.up .dot { background: var(--active-glow); box-shadow: 0 0 6px var(--active-glow); }
+  .control-pill.down { color: var(--muted); }
+  .control-pill.down .dot { background: var(--muted); }
+  .control-pill.flagged { color: var(--say); border-color: var(--say); }
+  .control-pill.flagged .dot { background: var(--say); }
+  .control-buttons { display: flex; gap: 6px; }
+  .ctl-btn {
+    flex: 1; padding: 7px 0; border-radius: 8px; font-size: 11px; font-weight: 600;
+    font-family: var(--hermes-font-sans); text-transform: uppercase; letter-spacing: .03em;
+    border: 1px solid var(--border); cursor: pointer;
+    background: linear-gradient(180deg, var(--e2), var(--e1)), var(--panel);
+    color: var(--fg); transition: all .15s ease;
+  }
+  .ctl-btn:hover { transform: translateY(-1px); box-shadow: var(--shadow-2); }
+  .ctl-btn:active { transform: translateY(0); }
+  .ctl-btn:disabled { opacity: .4; cursor: not-allowed; transform: none; box-shadow: none; }
+  .ctl-btn.ctl-start:hover { border-color: var(--active-glow); color: var(--active-glow); }
+  .ctl-btn.ctl-stop:hover { border-color: #ff6e6e; color: #ff6e6e; }
+  .ctl-btn.ctl-restart:hover { border-color: var(--accent); color: var(--accent); }
+  .control-msg { margin-top: 8px; font-size: 10px; color: var(--muted); min-height: 14px; }
 </style>
 </head>
 <body>
@@ -454,6 +485,20 @@
   </div>
 
   <div class="sidebar">
+    <div class="sidebar-card" id="control-card">
+      <h2>Controls</h2>
+      <div class="control-status" id="control-status">checking…</div>
+      <div class="control-buttons">
+        <button class="ctl-btn ctl-start" id="btn-start" onclick="doControl('start')">Start</button>
+        <button class="ctl-btn ctl-stop" id="btn-stop" onclick="doControl('stop')">Stop</button>
+        <button class="ctl-btn ctl-restart" id="btn-restart" onclick="doControl('restart')">Restart</button>
+      </div>
+      <div class="control-buttons" style="margin-top:6px;">
+        <button class="ctl-btn ctl-restart" id="btn-restart-dash" onclick="doControl('restart-dashboard')">Restart dashboard</button>
+      </div>
+      <div class="control-msg" id="control-msg"></div>
+    </div>
+
     <div class="sidebar-card">
       <h2>Inter-agent comms</h2>
       <div class="sidebar-card-body fixed-4" id="comms-body"><div class="empty">no contact yet</div></div>
@@ -749,6 +794,59 @@ async function refreshObserver() {
   `).join("");
 }
 
+async function refreshControlStatus() {
+  let st;
+  try {
+    st = await fetchJSON("/api/control/status");
+  } catch (e) {
+    document.getElementById("control-status").innerHTML =
+      `<span class="control-pill down"><span class="dot"></span>dashboard unreachable</span>`;
+    return;
+  }
+  const pills = [];
+  pills.push(st.harness_running
+    ? `<span class="control-pill up"><span class="dot"></span>harness running</span>`
+    : `<span class="control-pill down"><span class="dot"></span>harness stopped</span>`);
+  pills.push(st.watchdog_running
+    ? `<span class="control-pill up"><span class="dot"></span>watchdog on</span>`
+    : `<span class="control-pill down"><span class="dot"></span>watchdog off</span>`);
+  if (st.stop_flag_present) {
+    pills.push(`<span class="control-pill flagged"><span class="dot"></span>stop flagged</span>`);
+  }
+  document.getElementById("control-status").innerHTML = pills.join("");
+
+  document.getElementById("btn-start").disabled = st.harness_running && st.watchdog_running;
+  document.getElementById("btn-stop").disabled = !st.harness_running;
+  document.getElementById("btn-restart").disabled = false;
+  document.getElementById("btn-restart-dash").disabled = false;
+}
+
+async function doControl(action) {
+  const btns = ["btn-start", "btn-stop", "btn-restart", "btn-restart-dash"].map(id => document.getElementById(id));
+  btns.forEach(b => b.disabled = true);
+  const msgEl = document.getElementById("control-msg");
+  msgEl.textContent = "working…";
+  if (action === "restart-dashboard") {
+    // the server intentionally kills itself right after replying (or may
+    // drop the connection before replying at all) — don't treat that as
+    // an error, just tell the user to expect a brief blip.
+    try {
+      await fetch(`${API}/api/control/restart-dashboard`, { method: "POST" });
+    } catch (e) { /* expected — server is restarting */ }
+    msgEl.textContent = "dashboard restarting — page will reconnect in a few seconds";
+    setTimeout(refreshControlStatus, 3000);
+    return;
+  }
+  try {
+    const r = await fetch(`${API}/api/control/${action}`, { method: "POST" });
+    const d = await r.json();
+    msgEl.textContent = d.message || "done";
+  } catch (e) {
+    msgEl.textContent = "request failed — is the dashboard server up?";
+  }
+  setTimeout(refreshControlStatus, 1500);
+}
+
 async function refreshAll() {
   try {
     await refreshStatus(); // must resolve first so agentActive is fresh for the typing indicator
@@ -759,6 +857,7 @@ async function refreshAll() {
       refreshComms(),
       refreshWorkspace(),
       refreshObserver(),
+      refreshControlStatus(),
     ]);
   } catch (e) {
     console.error(e);
