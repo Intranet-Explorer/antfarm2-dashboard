@@ -342,30 +342,41 @@ def _pgrep_count(pattern):
 
 def control_status():
     return {
-        "harness_running": _pgrep_count(r"harness\.py") > 0,
-        "watchdog_running": _pgrep_count(r"watchdog\.sh") > 0,
+        "harness_running": _pgrep_count(r"antfarm2-standalone/harness\.py") > 0,
+        "watchdog_running": _pgrep_count(r"antfarm2-standalone/watchdog\.sh") > 0,
         "stop_flag_present": STOP_FLAG.exists(),
     }
 
 
 def control_start():
-    """Ensure the watchdog (and via it, the harness) are running."""
-    status = control_status()
+    """Ensure the watchdog (and via it, the harness) are running, via the
+    real launchd LaunchAgent - not a raw Popen, which would spawn an orphan
+    process outside launchd's supervision and defeat the whole point of
+    having KeepAlive/RunAtLoad in the first place."""
     STOP_FLAG.unlink(missing_ok=True)
-    if status["watchdog_running"]:
-        return {"ok": True, "message": "watchdog already running"}
-    subprocess.Popen(
-        ["nohup", "bash", "watchdog.sh"],
-        cwd=str(STANDALONE_DIR),
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        start_new_session=True,
+    r = subprocess.run(
+        ["launchctl", "kickstart", f"gui/{os.getuid()}/com.antfarm2.watchdog"],
+        capture_output=True, text=True, timeout=10,
     )
-    return {"ok": True, "message": "watchdog started"}
+    if r.returncode != 0 and "service is bootstrap" not in (r.stderr or ""):
+        # not yet loaded at all - bootstrap it fresh
+        subprocess.run(
+            ["launchctl", "bootstrap", f"gui/{os.getuid()}",
+             str(Path.home() / "Library/LaunchAgents/com.antfarm2.watchdog.plist")],
+            capture_output=True, text=True, timeout=10,
+        )
+    return {"ok": True, "message": "watchdog started via launchd"}
 
 
 def control_stop():
     """Signal a clean shutdown via the same STOP flag the harness/watchdog
-    already honor — never sends a raw kill, so a shift finishes cleanly."""
+    already honor — never sends a raw kill, so a shift finishes cleanly.
+    Note: the watchdog exiting on STOP does not by itself guarantee
+    harness.py (already spawned, no longer supervised once the watchdog
+    exits) sees the flag promptly if it's mid-shift on a long tool call -
+    harness.py's own stop_requested() check runs between shifts and STOP_FLAG
+    stays present the whole time, so it will still exit, just not always
+    instantly."""
     STOP_FLAG.touch()
     return {"ok": True, "message": "STOP flag set — harness will finish its current turn and shut down"}
 
@@ -374,13 +385,14 @@ def control_restart():
     """Clean-stop then restart, without blocking the request: touches STOP,
     waits (in a background thread) for the harness AND watchdog to actually
     exit (the watchdog itself exits on seeing STOP, by design), then clears
-    STOP and starts a fresh watchdog to bring the harness back up."""
+    STOP and kickstarts the launchd-managed watchdog to bring the harness
+    back up — same real-daemon path as control_start(), not a raw Popen."""
     STOP_FLAG.touch()
 
     def _wait_and_resume():
         for _ in range(90):  # up to ~90s: harness finishes its turn, then watchdog notices STOP
             time.sleep(1)
-            if _pgrep_count(r"harness\.py") == 0 and _pgrep_count(r"watchdog\.sh") == 0:
+            if _pgrep_count(r"antfarm2-standalone/harness\.py") == 0 and _pgrep_count(r"antfarm2-standalone/watchdog\.sh") == 0:
                 break
         STOP_FLAG.unlink(missing_ok=True)
         control_start()
@@ -390,28 +402,16 @@ def control_restart():
 
 
 def restart_dashboard_server():
-    """Spawn a detached replacement dashboard process, then exit this one.
-    Runs on a short delay in a background thread so the HTTP response for
-    the request that triggered this can actually be sent first. The old
-    process's socket needs a moment to fully release before the new one
-    can bind the same port even with SO_REUSEADDR set, so the replacement
-    is told to retry its own bind rather than racing a fixed sleep here."""
+    """Restart via launchd (kickstart -k), consistent with control_start()/
+    control_restart() — not a raw self-spawned Popen, which raced against
+    launchd's own view of whether com.antfarm2.dashboard was still alive
+    and could leave two dashboards running briefly or an orphan behind."""
     def _do_restart():
-        try:
-            time.sleep(0.3)
-            log_path = STANDALONE_DIR.parent / "antfarm2-dashboard" / "restart.log"
-            with open(log_path, "a") as logf:
-                p = subprocess.Popen(
-                    ["python3", str(Path(__file__).resolve())],
-                    stdout=logf, stderr=logf,
-                    start_new_session=True,
-                )
-            print(f"[restart] spawned replacement pid={p.pid}, log={log_path}")
-            time.sleep(0.3)
-            print(f"[restart] killing self pid={os.getpid()}")
-            os.kill(os.getpid(), signal.SIGTERM)
-        except Exception as e:
-            print(f"[restart] FAILED: {e}")
+        time.sleep(0.3)  # let the HTTP response for the triggering request go out first
+        subprocess.run(
+            ["launchctl", "kickstart", "-k", f"gui/{os.getuid()}/com.antfarm2.dashboard"],
+            capture_output=True, text=True, timeout=10,
+        )
     threading.Thread(target=_do_restart, daemon=True).start()
 
 
