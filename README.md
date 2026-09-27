@@ -1,8 +1,7 @@
 # antfarm2-dashboard
 
-**Live viewer for [antfarm2](https://github.com/Intranet-Explorer/antfarm2-standalone)** —
-watch two LLM agents think, act, and talk to each other in real time, no
-polling logs by hand.
+Live viewer for [antfarm2](https://github.com/Intranet-Explorer/antfarm2-standalone):
+watch two LLM agents think, act and talk to each other in real time.
 
 ![dashboard screenshot](screenshot.png)
 
@@ -34,14 +33,7 @@ It reads live from the harness's SQLite database
 (`../antfarm2-standalone/state.db` by default) — no separate setup, just
 point it at a running (or paused) harness instance.
 
-## Design notes
+## Security
 
-Dark, chat-bubble layout, styled to visually match the Hermes desktop app
-it was built alongside (same UI font stack, and headers use the app's
-"Collapse" display typeface — bundled here as a local asset.
-## Status
-
-Actively developed alongside the harness — this is the observation half of
-the same experiment; changes here mostly follow requests surfaced by
-actually watching agents run (e.g. "I can't tell whose column this is,"
-"I keep having to scroll to see new output," "that panel doesn't line up").
+Accepts requests only from its own page: no CORS, and POSTs need the
+`X-Antfarm` header.
