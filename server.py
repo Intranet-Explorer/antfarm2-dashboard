@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """
-antfarm2 live dashboard server.
-Serves a JSON API over both agent profiles' SQLite session stores plus
-the passive observer snapshots, and a static HTML/JS viewer.
-Stdlib only — no dependencies.
+antfarm2 dashboard server. JSON API over the harness's sqlite log, observer
+snapshots and the workspace, plus the static viewer. Stdlib only.
 """
 import sqlite3
 import json
@@ -167,7 +165,7 @@ def fetch_sessions(agent, limit=50):
 
 
 def fetch_status(agent):
-    """Is this agent's most recent session still running (no ended_at)?"""
+    """Whether the agent's latest session is still open."""
     conn = get_db(agent)
     if not conn:
         return {"active": False, "session_id": None, "started_at": None}
@@ -187,7 +185,7 @@ def fetch_status(agent):
 
 
 def fetch_agent_messages(limit=50):
-    """Cross-agent messages: any tool_calls referencing message_agent, across both DBs."""
+    """message_agent calls from both profile DBs, oldest first."""
     out = []
     for agent in PROFILES:
         conn = get_db(agent)
@@ -249,7 +247,7 @@ def fetch_stats(agent):
         tool_calls = conn.execute(
             "SELECT COUNT(*) c FROM messages WHERE role='assistant' AND tool_calls IS NOT NULL AND tool_calls != ''"
         ).fetchone()["c"]
-        # tool usage breakdown: parse tool_calls JSON per assistant message
+        # per-tool counts from each assistant message's tool_calls JSON
         tool_rows = conn.execute(
             "SELECT tool_calls FROM messages WHERE role='assistant' AND tool_calls IS NOT NULL AND tool_calls != ''"
         ).fetchall()
@@ -349,17 +347,16 @@ def control_status():
 
 
 def control_start():
-    """Ensure the watchdog (and via it, the harness) are running, via the
-    real launchd LaunchAgent - not a raw Popen, which would spawn an orphan
-    process outside launchd's supervision and defeat the whole point of
-    having KeepAlive/RunAtLoad in the first place."""
+    """Start the watchdog (and through it the harness) via its launchd agent.
+
+    Not Popen: that would leave an orphan outside launchd's supervision."""
     STOP_FLAG.unlink(missing_ok=True)
     r = subprocess.run(
         ["launchctl", "kickstart", f"gui/{os.getuid()}/com.antfarm2.watchdog"],
         capture_output=True, text=True, timeout=10,
     )
     if r.returncode != 0 and "service is bootstrap" not in (r.stderr or ""):
-        # not yet loaded at all - bootstrap it fresh
+        # not loaded; bootstrap it
         subprocess.run(
             ["launchctl", "bootstrap", f"gui/{os.getuid()}",
              str(Path.home() / "Library/LaunchAgents/com.antfarm2.watchdog.plist")],
@@ -369,28 +366,23 @@ def control_start():
 
 
 def control_stop():
-    """Signal a clean shutdown via the same STOP flag the harness/watchdog
-    already honor — never sends a raw kill, so a shift finishes cleanly.
-    Note: the watchdog exiting on STOP does not by itself guarantee
-    harness.py (already spawned, no longer supervised once the watchdog
-    exits) sees the flag promptly if it's mid-shift on a long tool call -
-    harness.py's own stop_requested() check runs between shifts and STOP_FLAG
-    stays present the whole time, so it will still exit, just not always
-    instantly."""
+    """Set the STOP flag. No kill, so the current shift finishes.
+
+    The harness checks the flag between tool calls, so a long call delays
+    the exit but doesn't prevent it."""
     STOP_FLAG.touch()
     return {"ok": True, "message": "STOP flag set — harness will finish its current turn and shut down"}
 
 
 def control_restart():
-    """Clean-stop then restart, without blocking the request: touches STOP,
-    waits (in a background thread) for the harness AND watchdog to actually
-    exit (the watchdog itself exits on seeing STOP, by design), then clears
-    STOP and kickstarts the launchd-managed watchdog to bring the harness
-    back up — same real-daemon path as control_start(), not a raw Popen."""
+    """Stop cleanly, then start again, without blocking the request.
+
+    A background thread waits for the harness and watchdog to exit, clears
+    STOP and calls control_start()."""
     STOP_FLAG.touch()
 
     def _wait_and_resume():
-        for _ in range(90):  # up to ~90s: harness finishes its turn, then watchdog notices STOP
+        for _ in range(90):  # harness finishes its turn, then watchdog sees STOP
             time.sleep(1)
             if _pgrep_count(r"antfarm2-standalone/harness\.py") == 0 and _pgrep_count(r"antfarm2-standalone/watchdog\.sh") == 0:
                 break
@@ -402,12 +394,11 @@ def control_restart():
 
 
 def restart_dashboard_server():
-    """Restart via launchd (kickstart -k), consistent with control_start()/
-    control_restart() — not a raw self-spawned Popen, which raced against
-    launchd's own view of whether com.antfarm2.dashboard was still alive
-    and could leave two dashboards running briefly or an orphan behind."""
+    """Restart the dashboard via launchctl kickstart -k.
+
+    Self-spawning races launchd and can leave two servers or an orphan."""
     def _do_restart():
-        time.sleep(0.3)  # let the HTTP response for the triggering request go out first
+        time.sleep(0.3)  # let the response go out first
         subprocess.run(
             ["launchctl", "kickstart", "-k", f"gui/{os.getuid()}/com.antfarm2.dashboard"],
             capture_output=True, text=True, timeout=10,
@@ -415,14 +406,11 @@ def restart_dashboard_server():
     threading.Thread(target=_do_restart, daemon=True).start()
 
 
-# --- Request origin checks (security fix, 2026-09-26) ----------------------
-# Binding to 127.0.0.1 does not stop a web page in the operator's browser
-# from reaching this server: any site could POST to /api/control/* (start,
-# stop, restart the harness), and `Access-Control-Allow-Origin: *` let any
-# page read the agents' transcripts and workspace listing. Now Host must be
-# this dashboard, POSTs need the X-Antfarm header (a cross-site page cannot
-# send it without a preflight, and preflights are refused) plus a matching
-# Origin when one is sent, and no CORS headers are emitted.
+# --- Request origin checks --------------------------------------------------
+# Binding to 127.0.0.1 doesn't stop a page in the browser from calling this
+# server. Host must be this dashboard (blocks DNS rebinding). POSTs need the
+# X-Antfarm header, which forces a preflight, and preflights are refused.
+# Origin must match when sent. No CORS headers.
 ALLOWED_HOSTS = {f"127.0.0.1:{PORT}", f"localhost:{PORT}"}
 ALLOWED_ORIGINS = {f"http://{h}" for h in ALLOWED_HOSTS}
 
@@ -472,7 +460,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if parsed.path == "/api/sessions":
             agent = qs.get("agent", ["alpha"])[0]
             shifts = fetch_standalone_shifts(agent)
-            # normalize field names to what the frontend expects
+            # map shifts to the session shape the frontend expects
             sessions = [{
                 "id": s["id"], "source": "shift", "model": AGENTS_MODEL.get(agent, ""),
                 "started_at": s["started_at"], "ended_at": s["ended_at"],
@@ -485,7 +473,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             agent = qs.get("agent", ["alpha"])[0]
             shift_id = qs.get("session_id", [None])[0]
             events = fetch_standalone_events(shift_id) if shift_id else []
-            # normalize to what the frontend expects
+            # map events to the message shape the frontend expects
             messages = []
             for e in events:
                 if e["role"] == "system":
@@ -579,9 +567,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 def main():
     STATIC_DIR.mkdir(exist_ok=True)
     socketserver.ThreadingTCPServer.allow_reuse_address = True
-    # A restart-triggered spawn can race the old process's socket release
-    # even with SO_REUSEADDR — retry the bind for a few seconds instead of
-    # crashing outright on "Address already in use".
+    # After a restart the old socket may still be held; retry the bind.
     last_err = None
     for attempt in range(20):
         try:

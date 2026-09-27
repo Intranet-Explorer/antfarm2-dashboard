@@ -22,8 +22,7 @@
     --accent: #b892ff;
     --active-glow: #4ade80;
     --title-warm: #e8c47a;
-    /* Hermes desktop app's own UI sans font stack, pulled from its shipped
-       CSS (--dt-font-sans), used for names/avatars/headings to match app chrome */
+    /* Hermes desktop UI font stack, for names, avatars and headings */
     --hermes-font-sans: "Segoe WPC", "Segoe UI", -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji", emoji;
 
     /* --- elevation system (FluentUI-style layered surfaces) --- */
@@ -332,7 +331,7 @@
   }
   .bubble-row.bubble-new { animation: bubbleIn .4s cubic-bezier(.22,1,.36,1); }
 
-  /* brief highlight pop on the single newest bubble — connected-animation style glow settle */
+  /* brief glow on the newest bubble */
   @keyframes popFlash {
     0%   { box-shadow: var(--shadow-2), 0 0 0 0 rgba(255,255,255,0.4); }
     60%  { box-shadow: var(--shadow-2), 0 0 0 8px rgba(255,255,255,0.08); }
@@ -528,7 +527,7 @@
 <script>
 const API = "";  // same-origin only; the server sends no CORS headers
 
-// track render state across refreshes so we only animate genuinely new items
+// render state across refreshes, so only new bubbles animate
 const renderState = {
   alpha: { lastCount: 0 },
   beta: { lastCount: 0 },
@@ -582,7 +581,7 @@ async function refreshStatus() {
       card.style.outline = "none";
     }
   }
-  // dim whichever agent's column isn't currently active, if exactly one is
+  // dim the idle agent's column when exactly one is active
   const anyActive = agentActive.alpha || agentActive.beta;
   document.getElementById("alpha-panel").classList.toggle("agent-inactive", anyActive && !agentActive.alpha);
   document.getElementById("beta-panel").classList.toggle("agent-inactive", anyActive && !agentActive.beta);
@@ -626,7 +625,7 @@ async function refreshStats() {
   }
 }
 
-// Build a flat, chronologically-ordered list of "bubble" events from raw messages.
+// Flatten raw messages into chronological bubble events.
 function buildBubbles(allMsgs) {
   const bubbles = [];
   let lastSession = null;
@@ -709,12 +708,12 @@ async function refreshAgentColumn(agent) {
   const sessions = sessD.sessions || [];
   document.getElementById(`model-${agent}`).textContent = sessions[0] ? (sessions[0].model||"") : "";
   const container = document.getElementById(`${agent}-messages`);
-  const scroller = document.getElementById(`${agent}-panel`); // the actual overflow:auto element
+  const scroller = document.getElementById(`${agent}-panel`); // the overflow:auto element
   if (!sessions.length) {
     container.innerHTML = `<div class="empty">no sessions yet</div>`;
     return;
   }
-  // pull messages from the most recent N sessions (chronological), newest session last
+  // messages from the last 4 sessions, oldest first
   const recent = sessions.slice(0, 4).reverse();
   let allMsgs = [];
   for (const s of recent) {
@@ -727,8 +726,7 @@ async function refreshAgentColumn(agent) {
   }
   const bubbles = buildBubbles(allMsgs);
   const state = renderState[agent];
-  // if the bubble count went DOWN (new session started, history trimmed), don't
-  // treat everything as "new" — just reset the baseline quietly
+  // count dropped (history trimmed): reset the baseline, don't animate everything
   const prevCount = bubbles.length >= state.lastCount ? state.lastCount : bubbles.length;
 
   const nearBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 60;
@@ -830,12 +828,11 @@ async function doControl(action) {
   const msgEl = document.getElementById("control-msg");
   msgEl.textContent = "working…";
   if (action === "restart-dashboard") {
-    // the server intentionally kills itself right after replying (or may
-    // drop the connection before replying at all) — don't treat that as
-    // an error, just tell the user to expect a brief blip.
+    // the server restarts right after replying, sometimes before; a failed
+    // fetch is expected
     try {
       await fetch(`${API}/api/control/restart-dashboard`, { method: "POST", headers: { "X-Antfarm": "1" } });
-    } catch (e) { /* expected — server is restarting */ }
+    } catch (e) { /* expected: server is restarting */ }
     msgEl.textContent = "dashboard restarting — page will reconnect in a few seconds";
     setTimeout(refreshControlStatus, 3000);
     return;
@@ -852,7 +849,7 @@ async function doControl(action) {
 
 async function refreshAll() {
   try {
-    await refreshStatus(); // must resolve first so agentActive is fresh for the typing indicator
+    await refreshStatus(); // first, so agentActive is current for the typing indicator
     await Promise.all([
       refreshStats(),
       refreshAgentColumn("alpha"),
@@ -867,10 +864,8 @@ async function refreshAll() {
   }
 }
 
-// FluentUI-style reveal highlight: track cursor position within any
-// .sidebar-card or .bubble under the pointer, set as CSS vars the
-// ::before radial-gradient reads. Delegated to one document listener
-// so it works for bubbles re-rendered every refresh cycle.
+// Reveal highlight: cursor position in .sidebar-card/.bubble goes into CSS
+// vars for the ::before gradient. One delegated listener survives re-renders.
 document.addEventListener("mousemove", (e) => {
   const el = e.target.closest(".sidebar-card, .bubble");
   if (!el) return;
