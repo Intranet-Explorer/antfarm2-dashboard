@@ -415,7 +415,39 @@ def restart_dashboard_server():
     threading.Thread(target=_do_restart, daemon=True).start()
 
 
+# --- Request origin checks (security fix, 2026-09-26) ----------------------
+# Binding to 127.0.0.1 does not stop a web page in the operator's browser
+# from reaching this server: any site could POST to /api/control/* (start,
+# stop, restart the harness), and `Access-Control-Allow-Origin: *` let any
+# page read the agents' transcripts and workspace listing. Now Host must be
+# this dashboard, POSTs need the X-Antfarm header (a cross-site page cannot
+# send it without a preflight, and preflights are refused) plus a matching
+# Origin when one is sent, and no CORS headers are emitted.
+ALLOWED_HOSTS = {f"127.0.0.1:{PORT}", f"localhost:{PORT}"}
+ALLOWED_ORIGINS = {f"http://{h}" for h in ALLOWED_HOSTS}
+
+
 class Handler(http.server.SimpleHTTPRequestHandler):
+    def _reject(self, why):
+        body = json.dumps({"ok": False, "message": f"forbidden: {why}"}).encode()
+        self.send_response(403)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _host_ok(self):
+        return (self.headers.get("Host") or "").strip().lower() in ALLOWED_HOSTS
+
+    def _post_ok(self):
+        if self.headers.get("X-Antfarm") != "1":
+            return False
+        origin = self.headers.get("Origin")
+        return origin is None or origin in ALLOWED_ORIGINS
+
+    def do_OPTIONS(self):
+        self._reject("cross-origin requests are not allowed")
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(STATIC_DIR), **kwargs)
 
@@ -426,12 +458,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         body = json.dumps(data, default=str).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
-        self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
     def do_GET(self):
+        if not self._host_ok():
+            self._reject("bad Host header")
+            return
         parsed = urlparse(self.path)
         qs = parse_qs(parsed.query)
 
@@ -513,6 +547,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         super().do_GET()
 
     def do_POST(self):
+        if not self._host_ok():
+            self._reject("bad Host header")
+            return
+        if not self._post_ok():
+            self._reject("missing X-Antfarm header or foreign Origin")
+            return
         parsed = urlparse(self.path)
 
         if parsed.path == "/api/control/start":

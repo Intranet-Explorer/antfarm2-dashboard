@@ -526,7 +526,7 @@
 </div>
 
 <script>
-const API = "http://127.0.0.1:8765";
+const API = "";  // same-origin only; the server sends no CORS headers
 
 // track render state across refreshes so we only animate genuinely new items
 const renderState = {
@@ -834,14 +834,14 @@ async function doControl(action) {
     // drop the connection before replying at all) — don't treat that as
     // an error, just tell the user to expect a brief blip.
     try {
-      await fetch(`${API}/api/control/restart-dashboard`, { method: "POST" });
+      await fetch(`${API}/api/control/restart-dashboard`, { method: "POST", headers: { "X-Antfarm": "1" } });
     } catch (e) { /* expected — server is restarting */ }
     msgEl.textContent = "dashboard restarting — page will reconnect in a few seconds";
     setTimeout(refreshControlStatus, 3000);
     return;
   }
   try {
-    const r = await fetch(`${API}/api/control/${action}`, { method: "POST" });
+    const r = await fetch(`${API}/api/control/${action}`, { method: "POST", headers: { "X-Antfarm": "1" } });
     const d = await r.json();
     msgEl.textContent = d.message || "done";
   } catch (e) {
