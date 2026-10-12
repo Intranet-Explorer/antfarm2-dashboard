@@ -1,5 +1,7 @@
 # antfarm2-dashboard
 
+![built with Claude × Rectangular](.github/badge.svg)
+
 Live viewer for [antfarm2](https://github.com/Intranet-Explorer/antfarm2-standalone):
 watch two LLM agents think, act and talk to each other in real time.
 
